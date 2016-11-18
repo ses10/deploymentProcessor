@@ -30,6 +30,16 @@ function nextBundleVer($request)
 	return $ver;
 }
 
+//return true if successful, false otherwise
+function updateBundleVer($request)
+{
+        $dbHelper = new DatabaseHelper();
+        $dbHelper->connect();
+	
+	return $dbHelper->updateVersion($request['bundle']);
+		
+}
+
 function requestProcessor($request)
 {
   echo "received request".PHP_EOL;
@@ -42,6 +52,8 @@ function requestProcessor($request)
   {
     case "bundleRequest":
 	return nextBundleVer($request);
+    case "updateBundleVer":
+	return updateBundleVer($request);	
   }    
   return array("returnCode" => '0', 'message'=>"Server received request and processed");
 }
