@@ -20,7 +20,14 @@ function logMessage($request)
 //returns the next bundle version # for a machine
 function nextBundleVer($request)
 {
+	$dbHelper = new DatabaseHelper();
+	$dbHelper->connect();
 	
+	
+	$ver = $dbHelper->getNextVersion($request['bundle']);
+	echo "the next version is " . $ver;	
+
+	return $ver;
 }
 
 function requestProcessor($request)
@@ -34,7 +41,7 @@ function requestProcessor($request)
   switch ($request['type'])
   {
     case "bundleRequest":
-	return "test";
+	return nextBundleVer($request);
   }    
   return array("returnCode" => '0', 'message'=>"Server received request and processed");
 }
