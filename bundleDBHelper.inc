@@ -25,6 +25,7 @@ class DatabaseHelper
 	}
 
 	//returns the next version of a bundle given its name
+	//but does not update row
 	public function getNextVersion($bundle)
 	{
 		$stmt = $this->conn->prepare('SELECT currentVer FROM bundle WHERE bundleName = :name');
@@ -36,7 +37,21 @@ class DatabaseHelper
 
 		return $ver + 1;
 	}
+
+	public function updateVersion($bundle)
+	{
+		$nextVer = $this->getNextVersion($bundle);
+
+		$stmt = $this->conn->prepare("UPDATE bundle SET currentVer = :nextVer WHERE bundleName = :name");
+		$stmt->bindParam(':nextVer', $nextVer);
+		$stmt->bindParam(':name', $bundle);
+		$stmt->execute();
+
+		if( $stmt->rowCount() > 0)
+			return true;
+		return false;
+	}
 	
 }
 
-?>
+?>	
