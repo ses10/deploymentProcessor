@@ -24,8 +24,8 @@ function nextBundleVer($request)
 	$dbHelper->connect();
 	
 	
-	$ver = $dbHelper->getNextVersion($request['bundle']);
-	echo "the next version is " . $ver;	
+	$ver = $dbHelper->getNextVersion($request['bundleName']);
+	echo "Next BundleVersion Request " . $request['bundleName'];	
 
 	return $ver;
 }
@@ -36,7 +36,9 @@ function updateBundleVer($request)
         $dbHelper = new DatabaseHelper();
         $dbHelper->connect();
 	
-	return $dbHelper->updateVersion($request['bundle']);
+	echo "Update BundleVerions Request";
+	
+	return $dbHelper->updateVersion($request['bundleName']);
 		
 }
 
@@ -46,19 +48,20 @@ function deployBundle($request)
 	$arr = json_decode($json, true);
 	
 	//get ip of target 
-	$target = ($arr[$request['bundle']][$request['machine']] );
+	$target = ($arr[$request['bundle']][$request['branch']] );
 	$ip = $target['ip'];
-	
+
 	echo "\n" . "Doing scp" . "\n";
 	
+	//get most recent bundle ver
         $dbHelper = new DatabaseHelper();
         $dbHelper->connect();
-        $ver = $dbHelper->getNextVersion($request['bundle']);
+        $ver = $dbHelper->getNextVersion($request['bundleName']);
 	$ver -= 1;	
-	$bundle = $request['bundle'] . $ver; 
+	$bundle = $request['bundleName'] . $ver; 
 
-	//scp 
-	$command= 'scp /home/ses/bundles/' . $bundle . ".tgz " . $target['user'] . "@" . $ip . ":/home/" . $target['user']. "/temp";
+	//scp to target 
+        $command= 'scp /home/ses/bundles/' . $bundle . '.tgz ' . $target['user'] . '@' . $ip . ':/home/' . $target['user']. '/temp';
 	shell_exec($command);
 	
 	//change ini according to targetmachine
@@ -66,20 +69,93 @@ function deployBundle($request)
 	
         //message target rabbitmq about recent deployment
         $client = new rabbitMQClient("targetRabbitMQ.ini","testServer");
-	$request = array();
-	$request['type'] = 'deployAlert';
-	$request['version'] = $ver;
-	$request['message'] = 'hey gaybo';
-	$client->publish($request);
-		
+	$req = array();
+	$req['type'] = 'deployAlert';
+	$req['version'] = $ver;
+	$req['bundleName'] = $request['bundleName'];
+	$req['bundleTar'] = $request['bundleName'] . $ver . ".tgz";
+	$req['bundleFolder'] = substr($request['bundleName'], 3, -2);	
+
+	$client->publish($req);		
 
 	echo 'recived deploybundle';
 	return $ip;
 }
 
+function rollbackBundle($request)
+{
+
+        $json = file_get_contents('./hosts.json');
+        $arr = json_decode($json, true);
+
+        //get ip of target 
+        $target = ($arr[$request['bundle']][$request['branch']] );
+        $ip = $target['ip'];
+
+        echo "\n" . "Doing scp" . "\n";
+
+        //get most recent bundle ver
+        $dbHelper = new DatabaseHelper();
+        $dbHelper->connect();
+        $ver = $dbHelper->getNextVersion($request['bundleName']);
+        $ver  = $ver - 2;
+        $bundle = $request['bundleName'] . $ver;
+
+        //scp to target 
+        $command= 'scp /home/ses/bundles/' . $bundle . ".tgz " . $target['user'] . "@" . $ip . ":/home/" . $target['user']. "/temp";
+	shell_exec($command);
+
+        //change ini according to targetmachine
+        shell_exec('python3 /home/ses/deploymentProcessor/changeIni.py ' . $ip);
+
+        //message target rabbitmq about recent deployment
+        $client = new rabbitMQClient("targetRabbitMQ.ini","testServer");
+        $req = array();
+        $req['type'] = 'deployAlert';
+        $req['version'] = $ver;
+        $req['bundleName'] = $request['bundleName'];
+        $req['bundleTar'] = $request['bundleName'] . $ver . ".tgz";
+        $client->publish($req);
+
+	echo 'recived rollbakc';
+
+	return $ip;
+}
+
+
 function deployAlert($request)
 {
-echo "\n Installing " . $request['version']. " \n";
+  $deployPath = '/home/ses/temp/';
+  
+  echo "\n Installing " . $request['bundleName']. $request['version']. " \n";
+
+  //create tmp folder
+  shell_exec('mkdir ' . $deployPath . 'tmp/');
+
+  //decompress
+  shell_exec('tar -xvf '. $deployPath .$request['bundleTar'] . ' -C ' . $deployPath . "tmp");
+  
+  $ini = (parse_ini_file($deployPath . 'tmp/' . 'bundle.ini'));
+  $dstPath =  $ini[$request['bundleFolder']];
+  
+  //delete tmp folder
+  shell_exec('rm -rf ' . $deployPath . 'tmp/' );
+
+  //copy tar to correct path - 1 directory
+  $rtPath = str_replace(PHP_EOL, '',  shell_exec('dirname '. $dstPath));
+  shell_exec('cp ' . $deployPath . $request['bundleTar'] . ' ' . $rtPath);
+
+  shell_exec( 'tar -xvf '. $rtPath . '/' . $request['bundleTar']. ' -C ' . $rtPath ); 
+
+  shell_exec('rm ' . $rtPath . '/'. $request['bundleTar'] );
+
+  //create tmp folder
+  //copy tar into it
+  //extract and read .ini for correct path
+  //delete tmp folder 
+  //copy tar to correct path - 1 directory
+  //extract and delete .ini
+
 }
 
 function requestProcessor($request)
@@ -99,7 +175,10 @@ function requestProcessor($request)
     case "deployBundle":
 	return deployBundle($request);
     case "deployAlert":
-	deployAlert($request);	
+	deployAlert($request);
+	break;
+    case "rollbackBundle":
+	return rollbackBundle($request);	
   }    
   return array("returnCode" => '0', 'message'=>"Server received request and processed");
 }
